@@ -1,0 +1,835 @@
+---
+title: "Introduction to dplyr"
+author: "Jordan Watson, NOAA Alaska Fisheries Science Center, jordan.watson@noaa.gov"
+date: "November 16, 2016"
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+
+*dplyr* is really a data syntax. From the author (Hadley Wickham), its goal is to:
+
+*   Identify the most important data manipulation tools needed for data analysis and make them easy to use from R.
+
+*    Provide blazing fast performance for in-memory data by writing key pieces in C++.
+
+*    Use the same interface to work with data no matter where it's stored, whether in a data frame, a data table or database.
+
+That's right, *dplyr* works with databases, too. So you can read in data from a SQL data base and voila, in no time, you are using your database in R. It's pretty cool. Today we'll just talk about data frames though. 
+
+RStudio has a great "cheatsheet" for dplyr on their website:
+https://www.rstudio.com/wp-content/uploads/2015/02/data-wrangling-cheatsheet.pdf
+
+Because dplyr is really a data manipulation (instead of statistics) grammar, most of the fancy statistical or modeling tools you use will still be done using the grammar you have been learning already - base R. But as you'll see, you can imbed those functions within some of the dplyr commands. 
+
+*dplyr* is essentially the newer version of an older package called *plyr*. I occasionally use *plyr* but I think that most of the functionality of *plyr* has been subsumed by *dplyr*. You may see reference to plyr on stack overflow sites, and it still may be useful. But for the sake of time, we won't go over it. One really important note is that if you load both *plyr* and *dplyr*, you need to load *plyr* first! You'll get a warning message if you do the order wrong, but really, how often do we actually read warning messages, right?
+
+You'll see that instead of loading the library *dplyr* I'm actually going to load one called *tidyverse*, which actually loads several different R libraries (see here for more info: https://blog.rstudio.org/2016/09/15/tidyverse-1-0-0/)
+
+\pagebreak
+
+#  Getting Started
+
+We're going to use a sample dataset for this exercise. The Bering Sea Groundfish Trawl Survey dataset. In the first code chunk below, I show you the website where you could get the original data and once you downloaded each of the annual csv files, how you could combine those files and save them into a single RData file. We'll skip that step here though, as I've already done that and saved the data set as an .RData file.
+
+
+```{r setup2}
+knitr::opts_knit$set(root.dir = 
+                       '//nmfs.local/AKC-ABL/Users2/jordan.watson/Desktop/Other_people/RWorkshop')
+```
+
+
+```{r setup}
+library(tidyverse)
+
+#  Download the Bering Sea trawl survey dataset. Original files can be accessed here:
+#  "http://www.afsc.noaa.gov/RACE/groundfish/survey_data/default.htm"
+#  csv files can be downloaded into your working directory and 
+#  combined into a single .RData file via:
+#  file.names <- list.files(path=".",pattern=".csv")
+#  trawl <- bind_rows(lapply(file.names,function(x)read.csv(x)))
+#  save(as.data.frame(trawl),file="trawl.RData")
+
+#  Alternatively, load the RData file via:
+load(url("https://sites.google.com/site/jordantwatson/r/trawl.RData"))
+```
+
+You can continue to load the data using the above command each time, or now that you have the "trawl" object in your R workspace, you could choose to save it to your computer like the following code chunk (if you do, make sure you change the path to something that makes sense for you). In RStudio, you can change the working directory using the drop down menus: "Session > Set Working Directory > Choose Directory". You can always check the working directory by typing "getwd()" at the command prompt. I often use the getwd() function on the NOAA network so I can remember / figure out which direction all of the slashes go. 
+
+```{r save data_data,include=FALSE}
+save(trawl,file="trawl.RData")
+```
+
+\pagebreak
+
+#  Explore / examine your datasets
+
+Even though I use *dplyr* constantly, it is more of a blend of *dplyr* and base R. Two of the main base R commands that I still use to explore data are **head()** and **str()**.
+
+```{r explore_baseR,results="hide"}
+head(trawl) # head shows the first 6 rows of an object. 
+
+#head(trawl,20) would give you the first 20 rows. 
+#  What do you think tail(trawl,20) would give you?
+
+# str() shows the first couple or so values for each column, 
+# and it gives the object class of each row.
+# This function may save your life when troubleshooting coding problems, 
+# which are often the result of something being a different class than you think.
+str(trawl)
+```
+
+Note that the above **str()** function tells us that the class of the object trawl is "data.frame."
+We could have also found this out using the **class()** function.
+
+```{r class}
+class(trawl)
+```
+
+*dplyr* tends to convert objects to its own type of data.frame, called tbl_df (or a tibble). These objects have a convenient feature, especially for the purposes of this document. If you were to simply type the word "trawl" into your R console right now and hit enter, all 406,927 rows of data would go flying past you (or more often, it will crash R). However, a tbl_df object by default will only show the first ten rows. So let's convert trawl to a tbl_df now.
+
+```{r tbl_df,results="hide"}
+trawl <- tbl_df(trawl)
+
+class(trawl)
+
+trawl
+```
+
+Now when we want to quickly examine the dataset, we can type head(trawl), or we can simply type trawl.
+
+*dplyr* adds **glimpse()**, a complement to **head()** and **str()**. It's like **str()** but it shows more values by filling (cluttering?) the screen width
+
+```{r explore_dplyr,results="hide"}
+glimpse(trawl)
+```
+
+I'll use some of these commands througout this document but for most of my purposes, **head()**, **str()**, and **glimpse()** could be used interchangably. 
+
+\pagebreak
+
+# rename()
+
+This is probably kind of a funny function to introduce first, but often times, one of the first things that I do with a data set is to create column names that:
+*     have a consistent format
+*     are easier to remember
+*     are relatively easy to type. 
+
+Think about how many times you might have to reference Chinook catches in your thesis on salmon. You probably don't want a column of your data.frame named "oncorhynchus.tshawytscha." I also prefer lowercase column names - it sounds really lazy, but holding the shift key gets cumbersome.
+
+*dplyr* functions start with the name of the data frame. So let's rename the fields in the "trawl" data.frame 
+
+```{r rename,results="hide"}
+trawl <- rename(trawl,
+                lat=LATITUDE,
+                long=LONGITUDE,
+                stn=STATION,
+                strat=STRATUM,
+                year=YEAR,
+                mydate=DATETIME,
+                wtcpue=WTCPUE,
+                numcpue=NUMCPUE,
+                common=COMMON,
+                latin=SCIENTIFIC,
+                sid=SID,
+                depth=BOT_DEPTH,
+                btemp=BOT_TEMP,
+                stemp=SURF_TEMP,
+                vessel=VESSEL,
+                cruise=CRUISE,
+                haul=HAUL,
+                survey=SURVEY)
+
+trawl
+```
+
+\pagebreak
+
+#Piping
+
+*dplyr* has teamed up with some other powerful R packages to change the way that we look at R syntax. One of the main aspects of this is "piping" which allows you to connect your R code together into chains of commands using **%>%** (control+shift+m in RStudio). When you pipe things together you always need to start with the the dataset, which can be called on its own, or it can become the first argument of the first function. For example, the following two lines yield identical results.
+
+```{r piping,results="hide"}
+head(trawl)
+
+trawl %>% head()
+```
+
+\pagebreak
+
+# select()
+
+This trawl data set has a lot of columns so to make things easier we'll split it up into two datasets for a bit. First we'll create a column ("index") that will allow us to rejoin the two datasets later. Second, you'll see a funny convention when we use the **select** function. There are a couple of R packages that have a **select** function so to tell R which version of the function you want to use, preface the function call with the name of the package and a double colon, **dplyr::select()**. This works with any function. You could use it all the time if you wanted to, but not using it when you need to leads to much profane language and contemplations of alternative careers.
+
+**select()** allows you to select or to deselect columns by name
+
+
+```{r split_the_data,results="hide"}
+trawl$index=1:nrow(trawl)
+
+trawl2 <- dplyr::select(trawl,index,lat,long,strat,mydate,stemp,haul,survey,vessel)
+
+#  Here we use the select command but pipe the data frame into the function. 
+#  The output is the same as the above usage of select.
+species <- trawl %>% dplyr::select(sid,common,latin)
+
+#  There is a fancier way to do this but for now we'll just show it the basic way. 
+#  We'll drop all column names that we don't want by putting a negative sign in front.
+#  Make sure you don't delete the index column.
+trawl <- dplyr::select(trawl,-c(lat,long,strat,mydate,stemp,haul,survey,vessel,common,latin))
+
+#  You can even rename columns within the select statement.
+#  Sometimes I'll create a "temp" object when I just want to experiment.
+temp <- trawl %>% dplyr::select(mydepth=depth)
+
+#  Let's see what it looks like.
+temp
+
+#  To avoid creating the object altogether but still seeing the results, 
+#  you could just nest the calls:
+head(trawl %>% dplyr::select(mydepth=depth))
+
+#  Or since this is a tbl_df object, we can just skip the head() altogether.
+trawl %>% dplyr::select(mydepth=depth)
+```
+
+#Exercise #1
+Use the help file for the **select** function (?select) to help you: select the "index"" column and all other columns from "trawl" whose names contain "cpue." 
+
+Yes, **dplyr::select(trawl,index,numcpue,wtcpue)** would technically be correct, but imagine there are 20 columns that fit the description and you're trying to avoid writing all of their names. Amazing things lurk within the help files. Try using the R help file first before Googling it (I know, that's so 1990s).
+
+\pagebreak
+
+# mutate() / transmute()
+
+Pretty often we want to change (or mutate) a data frame by adding a new column.
+**mutate()** will add a new column to the existing data frame.
+**transmute()** will create a new data frame that includes only your new column (and any others you may add on via **select**)
+
+```{r mutate_and_family,results="hide"}
+#  Add a column to the data that gives depth in feet
+trawl %>% mutate(depthfeet=depth*3.2)
+
+#  Add a column that logs cpue
+trawl %>% mutate(lwtcpue=log(wtcpue+1))
+
+#  Add a column that logs cpue and get the summary of that column
+summary(trawl %>% mutate(lwtcpue=log(wtcpue+1)))
+
+#  Create a dataset that includes only the logged cpue column
+trawl %>% transmute(lwtcpue=log(wtcpue+1))
+
+#  Create a dataset that includes logged cpue and the columns year and sid. 
+#  Kinda counter-intuitive because you want to use select. But select only pulls from 
+#  columns that are in the data.frame but as we saw from the previous call, the output 
+#  after the transmute statement is only the lwtcpue column. 
+trawl %>% transmute(lwtcpue=log(wtcpue+1),year,sid)
+```
+
+\pagebreak
+
+#filter()
+
+Filter is your way of subsetting in dplyr. You can still use base R subsetting, but sometimes this is just cleaner (and faster!!). It's similar to **subset**.
+
+```{r filter, results="hide"}
+
+#  Look at only trawl data from 2013 - using base R
+trawl[trawl$year==2013,]
+
+subset(trawl,year==2013)
+
+#  Not using dplyr
+filter(trawl,year==2013)
+
+trawl %>% filter(year==2013)
+
+#  Look at only trawl data from 2013 where the station number is J-19.
+#  Note that when the field is a character, we need quotes in the conditional statement.
+trawl %>% filter(year==2013 & stn=="J-19")
+
+#  This is just like:
+trawl[trawl$year==2013 & trawl$stn=="J-19",]
+
+#  Or:
+subset(trawl,year==2013 & stn=="J-19")
+```
+
+\pagebreak
+
+# summarise() / summarize()
+
+Just like it sounds, you can summarise any column (using built-in functions or custom functions). Either spelling works fine.  
+
+```{r summarise,results="hide"}
+#  How many unique Latin names are there in the species dataset
+species %>% summarise(sppn=length(unique(latin)))
+
+#  What is the maximum bottom temperature in the trawl data?
+trawl %>% summarise(mtemp=max(btemp))
+
+#  The above is really just a data frame (or a tbl_df, which acts the same), and 
+#  remember we could save as something:
+temp <- trawl %>% summarise(mtemp=max(btemp))
+
+str(temp)
+
+#  Just like other data frames we've seen, we can extract a named object via "$".
+temp$mtemp
+
+#  We could also skip a step if we wanted to and avoid the whole "temp" part
+(trawl %>% summarise(mtemp=max(btemp)))$mtemp
+
+#  To combine steps then, we could filter data using the maximum temperature that we 
+#  saw in one of our above outputs:
+trawl %>% filter(btemp==11.7)
+
+#  Or equivalently:
+trawl %>% filter(btemp==(trawl %>% summarise(mtemp=max(btemp)))$mtemp)
+```
+
+Let's try another summarise example. Let's identify the maximum bottom temp and the year during which that maximum temp occurred.
+
+```{r summarise_error,error=TRUE,results="hide"}
+trawl %>% summarise(temp=max(btemp),year=year[btemp==max(btemp)])
+```
+
+You get "Error: expecting result of length one, got: 19"
+
+This means that the output you asked for has 19 elements but summarise() can only have one element. I get this all the time and if you have a complicated query, it can be difficult to figure out what the problem is. 
+
+```{r summarise_2,results="hide"}
+#  Could the error be because 19 years all happen to have the maximum bottom temp?
+trawl %>% summarise(year=length(unique(year[btemp==max(btemp)])),
+                    temp=max(btemp))
+
+#  Huh. Only 1 year has the maximum temp. Which year was it?
+trawl %>% summarise(year=unique(year[btemp==max(btemp)]),
+                    temp=max(btemp))
+
+#  Let's look at the trawl data in 1991 when the temperature is at its maximum (11.7).
+trawl %>% filter(year==1991 & btemp==11.7)
+
+#  Well look at that, there are 19 records in 1991 with a temperature of 11.7.
+#  And all those records have the same station. So when we asked R to summarise, it 
+#  gave us the maximum temperature but there are 19 records (1 for each fish species) 
+#  that have that temperature.
+#  We only need one of those year records, so we can tell R to just give us the first one. 
+
+trawl %>% summarise(year=year[btemp==max(btemp)][1],
+                    temp=max(btemp))
+
+#  We can change the order of arguments within summarise if we want.
+trawl %>% summarise(temp=max(btemp),
+                    year=year[btemp==max(btemp)][1])
+
+
+#  Summarise can recognize the results of the different arguments we provide, in order. 
+#  We can refer to arguments that were just created if we write them in a particular order.
+#  If we first calculat max(btemp) and we call it "temp", we can then refer to temp 
+#  in subsequent calculations. 
+trawl %>% summarise(temp=max(btemp),
+                    year=year[btemp==temp][1])
+
+#  Another example of using consecutive arguments to reduce code writing
+trawl %>% summarise(temp=max(btemp),
+                    year=year[btemp==temp][1],
+                    stations=length(sid[btemp==temp]),
+                    totalstn=length(sid),
+                    propstn=stations/totalstn)
+
+
+```
+
+\pagebreak
+
+# group_by()
+
+```{r group_by,results="hide"}
+#  What is the maximum temperature per year?
+trawl %>% group_by(year) %>% summarise(max(btemp))
+
+#  What is the max temperature at each station each year?
+trawl %>% group_by(year,stn) %>% summarise(max(btemp))
+
+#  Let's look at the max bottom temps in each year at each station where species id is 
+#  20510 (sablefish) and cpue was > 10
+trawl %>% 
+  filter(sid==20510 & wtcpue>10) %>% 
+  group_by(year,stn) %>% 
+  summarise(max(btemp))
+
+#  For each year, species and station where wtcpue > 10, what was the maximum temperature?
+trawl %>% 
+  filter(wtcpue>10) %>% 
+  group_by(year,stn,sid) %>% 
+  summarise(max(btemp))
+```
+
+
+```{r summarise_subset,error=TRUE,results="hide"}
+
+#  For each cruise, let's summarise some stats:  
+trawl %>% 
+  group_by(cruise) %>% 
+  summarise(btemp=mean(btemp), #mean bottom temperature
+            topspec=sid[wtcpue==max(wtcpue)], #sid w greatest cpue
+            wtcpue=max(wtcpue), # max cpue (by weight)
+            year=year) # the year
+```
+
+Similar to the error message before about expecting a single value, you will get one again this time. This is because year is a vector and R doesn't know how to summarise it into a single value. But if you know that year is going to be the same for all values of a given cruise then you can tell R to just give you the first (or whatever one you prefer) value of the year vector without each cruise.
+
+```{r summarise_subset2,results="hide"}
+#  Reminder about subsetting. If you have a vector, you can extract a particular value 
+#  by using "[]" and referencing the position of your desired value.
+temp <- 1983:2015
+
+temp
+
+#  To extract the first value, use "[1]"
+temp[1]
+
+#  To extract the last value, use "[length(temp)]"
+temp[length(temp)]
+
+#  Below, we are summarising data from a particular cruise. All those data will have 
+#  the same year, so you just need to pick one of the year values. 
+#  The first one is a safe bet.
+trawl %>% group_by(cruise) %>% summarise(btemp=mean(btemp),
+                                         topspec=sid[wtcpue==max(wtcpue)],
+                                         wtcpue=wtcpue[wtcpue==max(wtcpue)],
+                                         year=year[1])
+
+#  Or you could use the "first()" function in dplyr. 
+#There is also a "last()" and an "nth()" function.
+trawl %>% group_by(cruise) %>% summarise(btemp=mean(btemp),
+                                         topspec=sid[wtcpue==max(wtcpue)],
+                                         wtcpue=wtcpue[wtcpue==max(wtcpue)],
+                                         year=first(year))
+
+
+```
+
+\pagebreak
+
+# arrange()
+
+```{r arrange,results="hide"}
+trawl
+
+arrange(trawl,depth) # Sort the trawl data by increasing depth
+ 
+arrange(trawl,-year) # Sort trawl data by decreasing year
+
+arrange(trawl,wtcpue,-year) # Sort trawl data by increasing cpue and decreasing year
+```
+
+\pagebreak
+
+#distinct()
+
+```{r distinct,results="hide"}
+
+#  Make sure that species is a tbl_df so that it doesn't output a kagillion rows every
+#  time we experiment here. 
+species <- tbl_df(species)
+
+#  What are the distinct common names (similar to unique(species$common))
+species %>% distinct(common)
+
+#  See all rows, and only the selected columns
+dplyr::select(species,common,latin,sid) # Note the number of rows
+
+#  See distinct combinations of common, latin, and sid
+#  This is often referred to as a lookup table. 
+dplyr::select(species,common,latin,sid) %>% distinct()
+
+#  Let's save this object for later.
+spp.lookup <- dplyr::select(species,common,latin,sid) %>% distinct()
+
+#  Same thing but order it by increasing sid
+dplyr::select(species,common,latin,sid) %>% distinct() %>% arrange(sid) 
+
+#  See all distinct rows that contain the word "pollock" in their common name.
+#  This is kinda ghetto because it's a strange combination of base R and dplyr.
+distinct(species[grepl("pollock",species$common),])
+
+species[grepl("pollock",species$common),] %>% distinct()
+
+#  See all distinct rows that contain the word "pollock" in their common name and select 
+#  only the columns common, scientific, and sid
+distinct(species[grepl("pollock",species$common),]) %>% 
+  dplyr::select(common,latin,sid)
+
+distinct(species[grepl("pollock",species$common),c("common")])
+
+distinct(species[grepl("pollock",species$common),c("common","latin","sid")])
+
+species %>% 
+  filter(grepl("pollock",common)) %>% 
+  dplyr::select(common,latin,sid) %>% distinct()
+
+species %>% 
+  filter(grepl("pollock",common)) %>% 
+  dplyr::select(sid) %>% 
+  distinct()
+```
+
+
+\pagebreak
+
+# Exercise #2
+As scientists, we often tally things. In base R, we could tally the number of each species via: 
+```{r,results="hide"}
+table(species$common)
+```
+We could filter that for just "walleye pollock" via 
+```{r,results="hide"}
+table(species$common[species$common=="walleye pollock"])
+```
+In *dplyr*, we could accomplish this using **summarise** and **n()** (which is equivalent to **length()** in base R). For example:
+```{r,results="hide"}
+species %>% group_by(common) %>% summarise(nspec=n()) %>% filter(common=="walleye pollock")
+```
+or
+```{r,results="hide"}
+species %>% filter(common=="walleye pollock") %>% summarise(n())
+```
+
+In this case, the base R version seems simpler, but as things get complicated, it is nice to have different ways to express the same thing at your finger tips. *dplyr* has a function called tally() which is like table. Look up **tally** in the R help file (**?tally** or you can Google it, but I think the help file will faster), and see if you can use **group_by**, **tally**, and **filter** to determine how many records in "species" contain "walleye pollock" in the "common" column.
+
+\pagebreak
+
+```{r}
+species %>% group_by(common) %>% tally() %>% filter(common=="walleye pollock")
+```
+
+\pagebreak
+
+#Joins
+
+Okay, so this is where dplyr starts to REALLY get awesome. The joining functions. These take the place of **merge** in base R but I find them much easier to use, and they are WAY faster. 
+
+Remember how we broke the trawl dataset into three pieces? Now we can bring these together. This is a really common thing (for me at least). Say you have monthly and annual catch data from one source, you have oceanographic data from another source and then you just downloaded PDO data from elsewhere. Or maybe you are working with survey data that are broken into a bunch of tables with common fields (called keys). The join functions assume that any column that has the same name is a key upon which the objects can be joined (assuming they are of the same type - for example, they are both integer or both character).
+
+**inner_join** combines all rows where both datasets are equal. For example, our trawl table has information about catches and it has a species id (sid) but what if we don't remember what the sid value for each species is? We can rejoin the species table or the spp.lookup table to the trawl data set using the common field, "sid". 
+
+Make sure that when you do an inner_join the result should never have more rows than the larger of your two datasets!
+
+```{r inner_join,results="hide"}
+#  First let's look at both of the datasets again:
+trawl
+spp.lookup
+
+inner_join(spp.lookup,trawl)
+
+#  Now we can pipe additional commands. 
+#  For example, we can join and then group by species in each year to determine 
+#  the average temperature at which a species is caught next year 
+#  (maybe we want to see if that has changed).
+inner_join(spp.lookup,trawl) %>% 
+  group_by(latin,year) %>% 
+  summarise(avgtemp=mean(btemp))
+
+#  Who needs SQL, right?
+```
+
+Notice from the output that the column "latin" appears to be blank. Uh oh, looks like our lookup table is missing some information. Probably best to fix that, but for now, we could also get rid of those missing values. In the following, we will first filter out latin values that are blank (in this case "" instead of NA). You'll notice here though that the inner_join statement no longer includes spp.lookup. Remember that the first part of a dplyr function is the data, but since we already specified and filtered a dataset, it knows that we are just piping the data that we just filtered. So we just leave off that previous dataset and we only have to specify the other dataset (in this case, trawl). 
+
+```{r inner_join_piping,results="hide"}
+spp.lookup %>% 
+  filter(latin!="") %>% 
+  inner_join(trawl) %>% 
+  group_by(latin,year) %>% 
+  summarise(avgtemp=mean(btemp))
+```
+
+Left_join is similar to inner_join but sometimes the values in the two datasets aren't all the same even though you want them to be. Left_join enables you to, for lack of a better term, fill in those missing values. For example, suppose we want to know the catch rates of spiny dogfish (sid==310) in each year, but spiny dogfish don't appear in every year in our dataset. If the year doesn't appear in the data, then we won't get a zero for the catch rate because R won't even know to look in the missing years. So those years will just be missing. 
+
+```{r left_join_1,results="hide"}
+trawl %>% 
+  filter(sid==310) %>% 
+  group_by(year) %>% 
+  summarise(avgcpue=mean(wtcpue))
+
+#  To make this example cleaner let's just save our dogfish count here as an object
+dogfish <- 
+  trawl %>% 
+  filter(sid==310) %>% 
+  group_by(year) %>% 
+  summarise(avgcpue=mean(wtcpue))
+
+```
+
+Let's create a data frame that contains all of our years (note here that this is a data frame, not just a vector of years). Normally you will be joining two more complicated objects.
+
+```{r left_join_2,results="hide"}
+yeardf <- data.frame(year=unique(trawl$year))
+
+yeardf
+
+#  In left_join, the result will have all values from the left object, 
+#  and only the values from the right object that have a match in the object on the left
+left_join(yeardf,dogfish)
+```
+
+```{r replace,results="hide"}
+#  We don't have time to discuss it further here, but one way that you could change all 
+#  those NAs to zeroes is by using a replace function that says, 
+#  "replace all values of avgcpue where avgcpue==NA with a 0"
+left_join(yeardf,dogfish) %>% mutate(avgcpue=replace(avgcpue,is.na(avgcpue),0))
+```
+
+Three more important notes about left_join. 
+
+First of all, you might have a column that means the same thing in two different data sets but that is named differently. You could either rename one of your datasets so that the names match, or you can just tell R which two names match. For example, if our year data frame had been named differently (e.g., our "year"" column said "sampleyear")
+
+```{r left_join_specifyname,results="hide",error=TRUE}
+yeardf <- data.frame(sampleyear=unique(trawl$year))
+
+#  First notice what happens if you try to join these. 
+#  It tells you there are "no common variables."
+left_join(yeardf,dogfish)
+
+left_join(yeardf,dogfish,by=c("sampleyear"="year"))
+```
+
+Second, it's not unusual that you'll try to join things but you'll get an error saying that they are incompatible. In such cases, you are probably trying to join a number with a character. For example, what if our year data frame contained a factor instead of a numeric column.
+
+```{r left_join_incompatible,results="hide",error=TRUE}
+yeardf <- data.frame(sampleyear=factor(unique(trawl$year)))
+
+left_join(yeardf,dogfish,by=c("sampleyear"="year"))
+```
+
+\pagebreak
+
+# Exercise #3
+Convert either yeardf$sampleyear or dogfish$year so that they are the same class (e.g., factor, character, numeric) and join them. This does not necessarily require dplyr. I don't mean for you to simply delete the word "factor" from the creation of "yeardf" above.
+
+The final note about left_join is actually right join. Right join is identical to left_join except that the order is switched. The first time I saw right_join I thought, "Why would I ever use a right_join when it's the same thing as left_join? I don't care what order they are in!" However, the key is for piping. Remember that when we piped commands for the inner_join statement, we didn't write the name of the first dataset in the inner_join function because it pulled it from the previous part of the pipe. 
+
+Here was the inner_join statment we used before. Remember that there is only one dataset named in the inner_join statement. For inner_join, the order of the datasets didn't matter. But for left and right joins, the order does matter!
+
+```{r right_join,results="hide"}
+spp.lookup %>% 
+  filter(latin!="") %>% 
+  inner_join(trawl) %>% 
+  group_by(latin,year) %>% 
+  summarise(avgtemp=mean(btemp))
+```
+
+Let's filter our dataset again for spiny dogfish and this time we'll combine that data frame with all those different years so that we won't have to save that intermediate "dogfish" dataset again. First, let's remember what that spiny dogfish dataset looked like.
+
+```{r right_join2,results="hide"}
+trawl %>% 
+  filter(sid==310) %>% 
+  group_by(year) %>% 
+  summarise(avgcpue=mean(wtcpue))
+
+#  Now let's create that year data frame again just for our example
+yeardf <- data.frame(sampleyear=unique(trawl$year))
+
+#  If we pipe the join statement, then the first dataset is automatically on the left. 
+#  But we want all the years from the yeardf dataframe, so we have to use the right_join
+trawl %>% 
+  filter(sid==310) %>% 
+  group_by(year) %>% 
+  summarise(avgcpue=mean(wtcpue)) %>% 
+  right_join(yeardf,by=c("year"="sampleyear"))
+```
+
+We would get the same if we moved the join statement before the group_by statement. Can you see why? Because the right_join just changes the number of years. Group_by will still group_by the year, it will just have more years to group.
+
+```{r right_join3,results="hide"}
+trawl %>% 
+  filter(sid==310) %>% 
+  right_join(yeardf,by=c("year"="sampleyear")) %>% 
+  group_by(year) %>% 
+  summarise(avgcpue=mean(wtcpue))
+
+#  Now we can add that replace statement to get rid of the NAs
+trawl %>% 
+  filter(sid==310) %>% 
+  group_by(year) %>% 
+  summarise(avgcpue=mean(wtcpue)) %>% 
+  right_join(yeardf,by=c("year"="sampleyear")) %>% 
+  mutate(avgcpue=replace(avgcpue,is.na(avgcpue),0))
+```
+
+\pagebreak
+
+# group_by() peculiarity
+
+Group_by is awesome and I use it all the time. It is also occasionally cause for a desire to change careers. When group_by is run, it creates a list of attributes for each of the groups. It then makes it so that so operations aren't possible on the entire object anymore, as your tbl_df is no longer simply a tbl_df, it is now a grouped_df composed of tbl_df's. Clear as mud, right? I don't really understand it. But I've figured out how to work around it (in other words, I'm a fish guy, not a computer programmer). Once you have used group_by, if you aren't getting the expected behavior, you can often fix that by just converting your new grouped dealie into either a tbl_df or a data.frame again. 
+
+```{r group_by_issue,results="hide"}
+#  Let's rerun our group_by statement from earlier, 
+#  and try to arrange our results according to increasing mean temperature
+trawl %>% 
+  filter(sid==20510 & wtcpue>10) %>% 
+  group_by(year,stn) %>% 
+  summarise(mtemp=max(btemp)) %>% 
+  arrange(mtemp)
+
+#  Hmm, doesn't look quite right. Let's look at the structure of our object.
+str(trawl %>% 
+      filter(sid==20510 & wtcpue>10) %>% 
+      group_by(year,stn) %>% 
+      summarise(mtemp=max(btemp)) %>% 
+      arrange(mtemp))
+
+#Yikes!! That's scary. Let's make that stuff go away by converting our result back to 
+#  a data frame using data.frame (note that there are no parentheses after data.frame).
+trawl %>% 
+  filter(sid==20510 & wtcpue>10) %>% 
+  group_by(year,stn) %>% 
+  summarise(mtemp=max(btemp)) %>% 
+  arrange(mtemp) %>% 
+  data.frame
+```
+
+Hmmm, why didn't that work? Well, we already knew that adding the arrange to the end wasn't working so adding the data.frame to the end of the already not working code didn't help us. 
+
+Let's create our group_df object and then convert the data types and THEN try to arrange it. We could use data.frame or tbl_df to yield the same result. 
+
+```{r group_by_issue2,results="hide"}
+trawl %>% 
+  filter(sid==20510 & wtcpue>10) %>% 
+  group_by(year,stn) %>% 
+  summarise(mtemp=max(btemp)) %>% 
+  tbl_df %>% 
+  arrange(mtemp)
+
+#  That looks better. Let's see what str says.
+str(trawl %>% 
+      filter(sid==20510 & wtcpue>10) %>% 
+      group_by(year,stn) %>% 
+      summarise(mtemp=max(btemp)) %>% 
+      tbl_df %>% 
+      arrange(mtemp))
+
+#  Or if we used data.frame?
+str(trawl %>% 
+      filter(sid==20510 & wtcpue>10) %>% 
+      group_by(year,stn) %>% 
+      summarise(mtemp=max(btemp)) %>% 
+      data.frame %>% 
+      arrange(mtemp))
+```
+
+\pagebreak
+
+# Some examples of tidying up model output for later (really this section is just for reference for later). 
+
+We don't have time to go into some of the fancier functionality but I wanted to include it so you have the code. *dplyr* has a few complementary packages that make model outputs clean and tidy. Guess what the packages are called - *tidyr* and *broom* (these people are so clever).
+
+So install and load these packages first
+
+
+```{r,echo=FALSE}
+library(tidyr)
+library(broom)
+```
+
+Model output can take up lots of space, but often times you don't care about lots of the output. So a more tidy way to look at model results would be good. As a reminder, first let's look at a normal linear model output. Let's look at the relationship between wtcpue and btemp for pollock in 2005.
+
+```{r lm_classic,results="hide"}
+
+lm1 <- lm(wtcpue~btemp,data=trawl[trawl$sid==21740 & trawl$year==2005,])
+summary(lm1)
+```
+
+Now using the **do()** function we can pipe a dataset into a linear model, saving both the model and the row. There is one funky convention we haven't talked about and that is "." - which is a way to tell R to use the dataset that has already been referenced in this row. This is one of those places where the intersection between *dplyr* and base R gets a little murky. Remember *dplyr* functions reference the data at the beginning but lots of base R functions do so at the end. In order to still use the results of any filtering, selecting, arranging, joining, etc., that you may have already done in your line of code, we just put a  "." where the "data=" would normally be. 
+
+```{r do_model,results="hide"}
+tidylm1 <- filter(trawl,sid==21740 & year==2005) %>% do(lm1=(lm(wtcpue~btemp,.)))
+```
+
+```{r tidy_model,results="hide"}
+tidy(lm1)
+```
+
+Often, we don't have any interest in saving the model object so we can nest the **tidy** within the **do** to just print the output.
+
+```{r tidy_do,results="hide"}
+trawl %>% filter(sid==21740 & year==2005) %>% do(tidy(lm(wtcpue~btemp,.)))
+```
+
+And of course, we can pipe in other dplyr functions like, **group_by** to model multiple years, for example
+
+```{r tidy_do_group,results="hide"}
+trawl %>% 
+  filter(sid==21740) %>% 
+  group_by(year) %>% 
+  do(tidy(lm(wtcpue~btemp,.)))
+
+#  Remember if we want to see all of the results we can convert the output to a data.frame
+trawl %>% 
+  filter(sid==21740) %>% 
+  group_by(year) %>% 
+  do(tidy(lm(wtcpue~btemp,.))) %>% 
+  data.frame
+```
+
+This format makes it really easy to plot model outputs because they are in a tidy data frame. For example, if we wanted to plot the btemp coefficient by year we could do the following
+
+```{r tidy_model_plot,results="hide"}
+trawl %>% 
+  filter(sid==21740) %>% 
+  group_by(year) %>% 
+  do(tidy(lm(wtcpue~btemp,.)))
+
+#  Note that every other row has btemp in the "term" column, 
+#  so we want to filter the data frame by btemp
+trawl %>% 
+  filter(sid==21740) %>% 
+  group_by(year) %>% 
+  do(tidy(lm(wtcpue~btemp,.))) %>% 
+  filter(term=="btemp")
+
+my.df <- 
+  trawl %>% 
+  filter(sid==21740) %>% 
+  group_by(year) %>% 
+  do(tidy(lm(wtcpue~btemp,.))) %>% 
+  filter(term=="btemp")
+
+plot(estimate~year,data=my.df)
+```
+
+Alternatively, if we didn't want the extra step of saving my.df, we could just stick the whole thing into the plot function. 
+
+```{r tidy_model_plot_compact,results="hide"}
+plot(estimate~year,
+     data=(trawl %>% 
+             filter(sid==21740) %>% 
+             group_by(year) %>% 
+             do(tidy(lm(wtcpue~btemp,.))) %>% 
+             filter(term=="btemp")))
+```
+
+One last example, using gams. There are a few custom functions within *broom* that organize model outputs in different ways: **glance**,**augment**,**tidy**. Here are some examples. Note that we still use the "." convention. 
+
+```{r gam,results="hide"}
+#  Load the gam library mgcv
+library(mgcv)
+trawl[trawl$sid==21740,] %>% 
+  group_by(year) %>% 
+  do(glance(gam(wtcpue~s(btemp),.,family="gaussian")))
+
+trawl[trawl$sid==21740,] %>% 
+  group_by(year) %>% 
+  do(augment(gam(wtcpue~s(btemp),.,family="gaussian")))
+
+trawl[trawl$sid==21740,] %>% 
+  group_by(year) %>% 
+  do(tidy(gam(wtcpue~s(btemp)+s(depth),.,family="gaussian")))
+```
+
+\pagebreak
+
+Acknowledgement:
+This document was one of the many outcomes of the NOAA Fisheries FishSET (Spatial Economics Toolbox for Fisheries) project funded by the NOAA Office of Science and Technology. The views and content expressed in this document do not represent those of the Department of Commerce, the National Oceanic and Atmospheric Administration, the National Marine Fisheries Service, or the Alaska Fisheries Science Center.

@@ -1,0 +1,1027 @@
+---
+title: "Introduction to ggplot2"
+author: "Jordan Watson, NOAA Alaska Fisheries Science Center, jordan.watson@noaa.gov"
+date: "November 18, 2016"
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+# Introduction
+There are tons of resources online for ggplot. If you search for "ggplot + XXXX" where XXXXX is the name of something you want to do (e.g., histogram or bar chart), you will likely be directed to http://docs.ggplot2.org/, which is this really great online help file written by Hadley Wickham (the guy that wrote dplyr, ggplot, lubridate, and is the chief scientist for RStudio, among many other accomplishments). You are likely to get even more directed web searches if you include the word "geom" in your search. That's because many of the functions in ggplot begin with the word, "geom."
+
+I have partly based this lecture off of a description of the ggplot "philosophy" presented at this website: http://r4ds.had.co.nz/introduction.html.
+
+There are a number of add-ons to ggplot - seemingly more by the data. For example, "ggmap" is a really good tool for....yup, making maps. "ggvis" is a newer one that is great for making interactive plots with fancy sliders and drop down menus for filtering data sets, etc. 
+
+A quick intro to some vocabulary first, as the vocabulary will help you to do two things.     
+1) Look for help more effectively.     
+2) Interpret error messages.    
+
+*Data*: Just like it sounds, this is the dataset that you are plotting. I'll leave it at that for now but we'll come back to some of the nuances later.    
+
+*Layers*: These are each of the different layers of data that you add to the plot. For example if you added points and lines, these are each a separate layer.    
+
+*Scales* and *coord*: Tell ggplot how to map the data in space to your plot. For example, whether you are plotting in log space or polar coordinates or using a mercator map projection.     
+
+*Facets*: Probably the coolest feature of ggplot is the use of different facets, which are subsets of data that can produce formatted and perfectly laid out panels of plots.    
+
+*Theme*: I find these to be the toughest parts of ggplot because there are all of the super nuanced little options that enable you to change and adjust just about everything in the plot. Similar to base R, you could plot for a lifetime and still have to look up all of your options constantly (at least that's what I tell myself when I look at the help file for the 12th time in a single hour). These are things like axis colors and rotating labels and formatting your legend titles, etc.    
+
+The basic format of ggplot is almost a template, though the order of many of the options does not *ALWAYS* matter (however, if you want your data to go on top of a map versus under the map, for example, order is crucial). Hadley has a great description (here: http://r4ds.had.co.nz/data-visualisation.html) of this basic template that I'm going to borrow.      
+
+**ggplot(data = <DATA>) + <GEOM_FUNCTION>(mapping = aes(<MAPPINGS>))**
+
+The parts inside the <> are the parts that you fill out. When he says, "mapping" here, think of this as how you would map the data to space. For example, if you were to make a map of geographic locations, you would put longitude along the x-axis and latitude along the y-axis. In doing that, you begin to produce the aesthetic quality of the map (i.e., how it looks). This mapping is critical to the aesthetics of the map and thus the fundamental aspects of your map are called within **aes()** (for "aesthetics").      
+
+The **GEOM_FUNCTION** part here tells R whether you want points (**geom_point**), lines (**geom_line**), histograms(**geom_histogram**), or a whole bunch of other options.     
+
+\pagebreak
+# Getting started
+
+Load the trawl dataset and the ggplot2 and dplyr libraries.
+
+```{r setup1,include=FALSE}
+setwd("//nmfs.local/AKC-ABL/Users2/jordan.watson/Desktop/Other_people/Franz/Guest_Lectures/R_Course/2016")
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+
+#  Download the Bering Sea trawl survey dataset. Original files can be accessed here:
+#  "http://www.afsc.noaa.gov/RACE/groundfish/survey_data/default.htm"
+#  csv files can be downloaded into your working directory and combined into a single .RData file via:
+#  file.names <- list.files(path=".",pattern=".csv")
+#  trawl <- bind_rows(lapply(file.names,function(x)read.csv(x)))
+#  save(as.data.frame(trawl),file="trawl.RData")
+
+#  Alternatively, load the RData file via:
+load(url("https://sites.google.com/site/jordantwatson/r/trawl.RData"))
+
+#Or if you happen to already have the dataset on your computer, you could just use:
+load("trawl.RData")
+```
+
+Rename the columns again using dplyr, like we did during the dplyr session. Let's also create a new field called, "region", where each observation is either "north" or "south" based on its position relative to an arbitrary threshold of 58 degrees. This is just for the sake of our examples today.
+
+```{r subset_trawl_data}
+trawl <- rename(trawl,
+                lat=LATITUDE,
+                long=LONGITUDE,
+                stn=STATION,
+                strat=STRATUM,
+                year=YEAR,
+                mydate=DATETIME,
+                wtcpue=WTCPUE,
+                numcpue=NUMCPUE,
+                common=COMMON,
+                latin=SCIENTIFIC,
+                sid=SID,
+                depth=BOT_DEPTH,
+                btemp=BOT_TEMP,
+                stemp=SURF_TEMP,
+                vessel=VESSEL,
+                cruise=CRUISE,
+                haul=HAUL,
+                survey=SURVEY) %>% 
+  mutate(region=ifelse(lat<58,"south","north"))
+```
+
+Now let's make a smaller dataset- just take a few of the top species. 
+
+We can **tally** (a dplyr function) our trawl dataset by latin name (this will give us the number of occurrences of each latin name), get rid of the blanks and **filter** by the number of records > 5000 (which I chose arbitrarily), and **select** just the latin name. This leaves us with just a list of 16 most common latin names. Then we **inner_join** with the trawl data to give us only those records from the trawl dataset that are in our list of latin names. We **group_by** year and species id, and we **summarise** to get the average catches, depths, and temps. We also want to include the common and latin names so we select those from each group (see the dplyr notes if this is confusing - feel free to email me if you don't have them). 
+
+```{r filter_data,message=FALSE}
+minidf <- tally(group_by(trawl,latin)) %>% 
+  filter(latin!="" & n>5000) %>% 
+  dplyr::select(latin) %>% 
+  inner_join(trawl) %>% 
+  group_by(year,sid) %>% 
+  summarise(wtcpue=mean(wtcpue),
+            numcpue=mean(numcpue),
+            depth=mean(depth),
+            btemp=mean(btemp),
+            common=common[1],
+            latin=latin[1])
+```
+
+If you still aren't comfortable with the *dplyr* part, don't worry, you can use base R with ggplot just as well. 
+
+\pagebreak
+
+#  Some basics using geom_point
+
+Make a simple scatterplot of cpue versus depth for all of the data
+
+```{r geom_point1}
+ggplot(data=minidf) + geom_point(aes(x=wtcpue,y=depth))
+```
+
+Well, that's a little wonky because of outliers on the x-axis. Within our call to ggplot, we can easily log-transform the x-axis data
+
+\pagebreak
+
+```{r geom_point2}
+ggplot(data=minidf) + geom_point(aes(x=log(wtcpue),y=depth))
+```
+
+\pagebreak
+
+What about changing the color of the points? We can simply add a call to "color" (or "colour") within the geometry. 
+
+```{r point_color}
+ggplot(data=minidf) + geom_point(aes(x=log(wtcpue),y=depth),color="red")
+```
+
+\pagebreak
+
+Similarly, we can adjust the size, shape, transparency of points.
+
+```{r point_color-size_shape}
+ggplot(data=minidf) + geom_point(aes(x=log(wtcpue),y=depth),color="red",size=0.5,shape=2)
+```
+
+\pagebreak
+
+But why does "shape=2" create triangles? 
+There are numeric codes for colors, shapes and fills in R. These are the same in ggplot and in base R. Conveniently, you don't have to memorize them because it's really easy to ask what they aRe (get it? What they a"R"e). 
+
+Let's make a demo plot (which I do fairly often) that displays the shapes.
+
+```{r shapes1}
+ggplot() + geom_point(aes(x=1:25,y=1:25),shape=1:25,size=4)
+```
+
+\pagebreak
+
+Does it work the same with colors?
+
+```{r shapes2}
+ggplot() + geom_point(aes(x=1:25,y=1:25),shape=1:25,size=4,color=1:25)
+```
+
+You'll notice only 8 different colors pop up. After 8, it just recycles the colors. However, there are an infinite number of color options. Here (http://www.stat.columbia.edu/~tzheng/files/Rcolor.pdf) is an example of the named colors in R (instead of putting **color=2** you could put **color="red"**). Here (http://research.stowers-institute.org/efg/R/Color/Chart/ColorChart.pdf) is another page that shows both text and numeric codes that you can use. There are about a million websites on color in R.... 
+\pagebreak
+
+You can also adjust the transparency (called "alpha") on a 0 to 1 scale (0 being transparent). This is often helpful when you have many overlapping points, as it allows you to more easily see data densities in these regions. In the 
+
+```{r point_color-size_shape2}
+ggplot(data=data.frame(x=rnorm(10000),y=rnorm(10000))) + geom_point(aes(x=x,y=y),color="red",alpha=0.25)
+```
+
+\pagebreak
+
+Here's a similar plot without the transparency.
+
+```{r point_color-size_shape3}
+ggplot(data=data.frame(x=rnorm(10000),y=rnorm(10000))) + geom_point(aes(x=x,y=y),color="red")
+```
+
+\pagebreak
+
+How you specify color (and shape, etc.) is quite important. Note that in the above example, the **color="red"** fell outside of the **aes()** call. This applies the same color to all points. When you put something like **color** or **shape** or **size** inside the **aes()** then ggplot wants to use those calls as a way to map the data. This has been really difficult for me to wrap my head around. Things inside **aes()** affect how different groups within the data are mapped. 
+
+I try to think of it like this. In the above plots, we could make the plot and then change the color (or shape or transparency), and it wouldn't change the way that we interpreted the data - just how we view or see the data. If you put something INSIDE the ***aes()*** it changes how you would interpret the figure because it is part of how the data are actually plotted.
+
+Let's build this example by first showing you what does not work. 
+
+```{r point_color-size_shape4}
+ggplot(data=minidf) + geom_point(aes(x=log(wtcpue),y=depth,color="blue"))
+```
+
+If we try to specify a color inside of the **aes()**, ggplot wants to plot the data differently. It thinks that if you type "color='blue'" that 'blue' is a column in your data and that you want to plot the values within the column "blue" by different colors. Well, obviously we don't have a column called "blue" so it just calls your x,y data "blue" and it assigns it the first color in its automatic quiver of colors (the first of which is this kind of pink color).
+
+"blue" now appears in a legend as though it's a category within your data. It thinks that you are simply renaming your data "blue." Well, when you specify **color** (or **fill** or **group** or **size** or **shape**) within **aes()**, ggplot wants to color categories of data differently, for example. So instead, let's put "common" (the names of our species from the minidf data) in the color call and the points will instead be colored differently for each species. 
+
+\pagebreak
+
+```{r point_color_class}
+ggplot(data=minidf) + geom_point(aes(x=log(wtcpue),y=depth,color=common))
+```
+
+In ggplot terms, we are mapping a color to each of the categories (or factor levels) in the data. 
+
+\pagebreak
+
+We can do the same thing with shape. But you'll notice an error message telling us that we can only have up to 6 different shapes automatically assigned, and we are asking for 16. 
+
+```{r point_shape_class}
+ggplot(data=minidf) + geom_point(aes(x=log(wtcpue),y=depth,shape=common))
+```
+
+\pagebreak
+
+Alternatively, we could make a transparency gradient by species (which still isn't very helpful for lots of categories).
+
+```{r point_shape_class2}
+ggplot(data=minidf) + geom_point(aes(x=log(wtcpue),y=depth,alpha=common))
+```
+
+\pagebreak
+
+Or different sizes by species. 
+
+```{r point_shape_class3}
+ggplot(data=minidf) + geom_point(aes(x=log(wtcpue),y=depth,size=common))
+```
+
+Notice that it looks horrible and conveniently, it warns us that this is not an advisable thing to do (because it is difficult to discern among classes).
+
+\pagebreak
+
+# geom_line and some other geometries
+
+Let's explore some more interesting plots. To do so, first make a dataset that's even smaller yet subsetting six species only. 
+
+```{r small_dataset}
+sixspp <- c("arrowtooth flounder","flathead sole", "Pacific cod", 
+            "Pacific halibut", "sturgeon poacher", "walleye pollock")
+
+#  We can use a matching function that looks for all of the values within minidf$common that are in our list of sixspp.
+newdf <- filter(minidf,common %in% sixspp)
+```
+
+I'll also show an alternative way to assign the calls to **ggplot()** and **geom_**. Depending on how complicated you are going to be, you can put most of the information into just the **ggplot()**.    
+
+```{r the_data}
+newdf[1:20,]
+```
+
+First, let's look at a line graph of CPUE over time for each of the 6 species in our new dataset. 
+
+So we start by specifying our **ggplot()** and the **geom_line()** call. 
+
+```{r geom_line}
+ggplot(newdf,aes(x=year,y=log(wtcpue))) + geom_line()
+```
+
+Whoa. That's not what we wanted! What happened? Thoughts? 
+
+It plotted all of the data for each year, connected by lines. But we didn't tell it to plot each species separately. 
+
+\pagebreak
+
+So we could use the the **color** argument like we did before. Or we can use a more simple one called **group**. 
+
+```{r geom_line2}
+ggplot(newdf,aes(x=year,y=log(wtcpue),group=common)) + geom_line()
+```
+
+That looks better, though kinda boring for this line plot. However, the group argument can be really useful for things like boxplots, as we'll see later. 
+
+\pagebreak
+
+Meanwhile, we can color lines by species like we did for the points above. 
+
+```{r geom_line3}
+ggplot(newdf,aes(x=year,y=log(wtcpue),color=common)) + geom_line()
+```
+
+Note that when we used "group", we broke the figure into six groups but they're all the same. However, when we used color, the groups are now distinct, and thus, a legend can be used to help distinguish among them. 
+
+So now we have time trends of the cpue for 6 species (by color). 
+
+But why did I bother to move all the information into **ggplot** instead of inside **geom_line** like we did before? 
+
+You can save graphic objects as their own object. For example, we could save the whole **ggplot(newdf,aes(x=year,y=log(wtcpue),color=common))** as it's own object and then if we want to explore different geometries, it's a lot more concise. 
+
+```{r geom_object1}
+p1 <- ggplot(newdf,aes(x=year,y=log(wtcpue),color=common,linetype=common))
+```
+
+\pagebreak
+
+```{r geom_object2}
+p1 + geom_line()
+```
+
+\pagebreak
+
+If we plot just points, the "linetype" part of the saved object, p1, will just be ignored.
+
+```{r geom_object3}
+p1 + geom_point()
+```
+
+\pagebreak
+
+```{r geom_object4}
+p1 + geom_line() + geom_point()
+```
+
+\pagebreak
+
+Now what if we wanted to put each of these lines on its own plot? This is where a super cool feature of ggplot comes in. **Faceting** creates a new panel or plot for each of the classes that you specify. 
+
+```{r facet1}
+#  Facet 
+ggplot(newdf,aes(x=year,y=log(wtcpue))) + 
+  geom_line() + 
+  geom_point() + 
+  facet_grid(.~common)
+```
+
+\pagebreak
+
+```{r facet2}
+ggplot(newdf,aes(x=year,y=log(wtcpue))) + 
+  geom_line() + 
+  geom_point() + 
+  facet_grid(common~.)
+```
+
+\pagebreak
+
+```{r facet3}
+ggplot(newdf,aes(x=year,y=log(wtcpue))) + 
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~common)
+```
+
+\pagebreak
+
+```{r facet4}
+ggplot(newdf,aes(x=year,y=log(wtcpue))) + 
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~common,ncol=2)
+```
+
+Notice how the lines are relatively flat (i.e., boring) because they are scaled to be the same across all six panels? You can allow each panel to vary freely in the x direction (**scales="free_x"**), in the y direction (**scales="free_y"**), or in both (**scales="free"**). 
+
+\pagebreak
+
+In our case, all panels include the same year so allowing the x axis to rescale for each plot wouldn't do much.
+
+```{r scales.x}
+ggplot(newdf,aes(x=year,y=log(wtcpue))) + 
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~common,ncol=2,scales="free_y")
+```
+
+\pagebreak
+
+```{r scales_all}
+ggplot(newdf,aes(x=year,y=log(wtcpue))) + 
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~common,ncol=2,scales="free")
+```
+
+\pagebreak
+
+Often it is helpful to look at data via multiple subsets at one time. Here I'll demonstrate a few things.    
+
+1) We can subset the data inside of the **ggplot()** call so that we don't have to make a temporary variable (as we did with minidf or newdf above). In this case, we subset the trawl data (the full dataset) for three species of flatfish since 2011.     
+
+2) I drop the **x=** and the **y=** in the call to **aes()**. It assumes that the first argument is x and the second argument is y.  
+
+3) We specify two gridding variables by putting one on either side of the ~.     
+
+```{r facet_2d}
+p1 <- ggplot(trawl[(trawl$common %in% 
+                      c("arrowtooth flounder","flathead sole", "Pacific halibut")) & 
+                     trawl$year>2011,],aes(depth,log(wtcpue)))
+
+p1 + geom_point() + facet_grid(year~common)
+```
+
+Faceting is a really powerful component of ggplot and I encourage you to explore the help files for faceting (e.g., http://docs.ggplot2.org/current/facet_grid.html, http://docs.ggplot2.org/current/facet_wrap.html). 
+
+\pagebreak
+
+#  Multiple geometries and data objects
+
+Sometimes we want to customize which data are displayed on a plot. Maybe you want points of one species and lines for another. Or maybe you want to plot multiple datasets on top of each other. In this example, we'll subset two different species manually, allowing us to pretend that we are using two datasets (in actuality, we are creating two different datasets - they just happen to come from the same original one). 
+
+```{r}
+# Note, you don't need the funky 
+ggplot() + 
+  geom_line(data=(newdf %>% filter(common=="arrowtooth flounder")),
+            aes(x=year,y=log(wtcpue))) + 
+  geom_point(data=(newdf %>% filter(common=="arrowtooth flounder")),
+             aes(x=year,y=log(wtcpue))) + 
+  geom_line(data=(newdf %>% 
+                  filter(common=="walleye pollock")),
+            aes(x=year,y=log(wtcpue)),linetype=2,color="blue") +
+  geom_point(data=(newdf %>% 
+                   filter(common=="walleye pollock")),
+             aes(x=year,y=log(wtcpue)),color="blue") + 
+  xlab("Year") + 
+  ylab("log(CPUE) by weight") + 
+  ggtitle("CPUE by species over time")
+```
+
+When you specify the data inside of **geom_** instead of **ggplot()**, include "data=". Otherwise you will get the annoying and not particularly helpful error message:
+**Error: ggplot2 doesn't know how to deal with data of class uneval**     
+
+\pagebreak
+
+# Boxplots
+
+We saw how you can plot different factor levels with colors, shapes, etc. via points or lines, but how about via boxplots (What do you think the geometry is called for a boxplot?)? 
+
+Make a boxplot of cpue by species in the year 2015.
+
+```{r boxplot1}
+temp <- trawl %>% filter(year==2015 & common %in% sixspp)
+
+ggplot(temp,aes(x=year,y=log(wtcpue))) + geom_boxplot()
+```
+
+What's wrong with this plot?    
+1) What's up with the x-axis? We only asked for year to be 2015 and R is giving us a continuous variable with values on either side of 2015.     
+2)  Our data should have six species in it. But we only have one boxplot instead of six.     
+
+\pagebreak
+
+First, let's address the x-axis. For boxplots, we need the x-axis to be a factor, so we simply need to add **factor()** to year.
+
+```{r boxplot2}
+ggplot(temp,aes(x=factor(year),y=log(wtcpue))) + geom_boxplot()
+```
+
+Okay, that fixed the x-axis. 
+
+\pagebreak
+
+But we still only have one box instead of six. 
+
+```{r boxplot3}
+ggplot(temp,aes(x=factor(year),y=log(wtcpue),group=common)) + geom_boxplot()
+```
+
+\pagebreak
+
+#  Exercise 1
+Create a new temporary dataset (maybe call it "temp2") from trawl that includes our same six species but only includes years since 2010). Instead of saving a temporary dataset, you can instead just include the new dataset call inside of ggplot. Whichever you prefer.     
+
+Experiment with changing the **group** argument to **fill** and to **color**. Do you understand what the difference is?      
+
+**1a.** Make a figure for your new dataset that shows the years 2011 - 2016 on the x-axis. For each year there are 6 boxplots, filled with a different, solid color. There is a legend that shows all six species. Run the **ggsave** function in the line following your plot to save your figure as a pdf called "exercise_1a".     
+
+**1b.** Make a figure for your new dataset that has each of the 6 species on the x-axis. Create a facet for each year such that you have 6 different plots, each filled with a solid color and including a legend. Allow the y-axes of each of your plots to vary. Save the figure as a pdf called "exercise_1b."     
+
+Don't worry about the overlapping axis labels yet. We'll get to that shortly.      
+
+\pagebreak
+
+#  themes
+
+You can customize everything in ggplot, though I find it really far from intuitive and I have to look it up...pretty much every time. However, there are also some built-in themes (e.g., http://docs.ggplot2.org/dev/vignettes/themes.html). The theme I use most often is **theme_bw()**.
+
+Let's add the theme to our previous plot. 
+
+```{r boxplot_group}
+ggplot(temp,aes(x=factor(year),y=log(wtcpue),group=common)) + 
+  geom_boxplot() + 
+  theme_bw()
+```
+
+\pagebreak
+
+If you want to see what this theme consists of, you can just type **theme_bw()** at the command line and hit enter. You'll see a list of 44 different plotting attributes. I'm actually going to print this entire object because if you take a minute to look at some of the different components it can be fairly informative to see what the options are. And I like to waste paper because I hate trees.
+
+```{r theme}
+theme_bw()
+```
+
+Whoa, that's a lot of attributes! Let's step through a few of them by making our own custom example.
+
+\pagebreak
+
+First, create a base plot with three species (I've added the [1:3] index after "sixspp" which will give the first three species from this list of six) since 2000.
+
+```{r customize1}
+temp2 <- trawl %>% filter(common %in% sixspp[1:3] & year>2000)
+
+ggplot(temp2,aes(x=factor(year),y=log(wtcpue))) + 
+  geom_boxplot() + 
+  facet_wrap(~common)
+```
+
+\pagebreak
+
+Let's look at a little more complicated example that includes multiple groups (the north and south regions) within each year and each facet. 
+
+```{r customize2}
+ggplot(temp2,aes(x=factor(year),y=log(wtcpue),fill=region)) + 
+  geom_boxplot() + 
+  facet_wrap(~common)
+```
+
+\pagebreak
+
+First, these are the default colors in ggplot. However, I recently asked a colorblind person how these looked to him and he said, "pretty much the same." So if you wanted to just quickly change these colors could specify a manual set of fill colors.
+
+```{r customize3}
+ggplot(temp2,aes(x=factor(year),y=log(wtcpue),fill=region)) + 
+  geom_boxplot() + 
+  facet_wrap(~common) + 
+  scale_fill_manual(values=c("blue", "forestgreen"))
+
+```
+
+\pagebreak
+
+Now, let's make some custom colors. When I make posters for example, I like to create custom color themes that run throughout the poster. You can then use the custom colors throughout your poster by creating these custom colors in Powerpoint or InDesign or Inkscape or whaterver you're using for your poster. I'll use an example with some colors from a poster I did last year (happy to share the poster with you if you'd like an example of what it looks like when all put together). There are some great websites (like http://colorbrewer2.org/#type=sequential&scheme=BuGn&n=3) that will give you color schemes and the rgb/cmyk values for each color.
+
+You can create your own colors using rgb, cmyk, hex, etc. We'll use the **rgb()** function from base R.
+
+```{r ColorCustomization}
+AFSDarkBlue <- rgb(29,66,125,max=255)
+AFSMedBlue <- rgb(80,145,205,max=255)
+AFSLightBlue <- rgb(202,222,243,max=255)
+
+p1 <- ggplot() + 
+  geom_point(aes(x=factor(1:3),y=2),color=c(AFSDarkBlue,AFSMedBlue,AFSLightBlue),size=20) + 
+  theme_bw() + 
+  xlab("") + 
+  ylab("")
+
+p1
+```
+
+If you don't understand what **rgb()** is doing here, look at the help file (**rgb()**).
+
+\pagebreak
+
+This box just looks really ghetto because I'm simply trying to show you a few colors and it seems nonsensical to have numbered axes. We can create a custom theme that gets rid of the axis labels by describing each of the elements as "element_blank". But what do I mean by "elements?" There are three types of elements -     
+
+1) **element_text** (e.g., labels and titles)
+2) **element_line** (e.g., ticks, grid lines)
+3) **element_rect** (e.g., any sort of box, border, background)
+
+Well, and I suppose we could say a fourth element is just
+
+4) **element_blank**, which applies to any of the elements and the components and just makes the blank. 
+
+```{r ColorCustomization2}
+p1 + theme(axis.text.x=element_blank(),
+           axis.text.y=element_blank(),
+           panel.grid.major = element_blank(),
+           panel.grid.minor = element_blank(),
+           axis.ticks=element_blank())
+```
+
+\pagebreak
+
+We can save a custom theme so that we don't have to write it out each time (just like has already been done with theme_bw())
+
+```{r customize4}
+my.theme <- theme_bw() +  
+  theme(plot.background = element_rect(fill=AFSLightBlue),
+        panel.background=element_rect(fill=AFSLightBlue),
+        axis.text=element_text(color=AFSDarkBlue),
+        strip.background=element_rect(fill=AFSMedBlue),
+        strip.text=element_text(color=AFSLightBlue),
+        legend.background=element_rect(fill=AFSLightBlue),
+        legend.key=element_rect(fill=AFSLightBlue),
+        axis.title.x=element_text(color=AFSDarkBlue),
+        axis.title.y=element_text(color=AFSDarkBlue)) 
+
+#  Create custom labels for the facet title panels.                          
+fish_names <- c(
+  `arrowtooth flounder` = "ATF",
+  `flathead sole` = "FTS",
+  `Pacific cod` = "COD")
+
+#  Let's make some custom colors for our grouping variables
+my.col <- c(AFSMedBlue,AFSDarkBlue)
+
+p2 <- ggplot(data=temp2,aes(x=factor(year),y=log(wtcpue),fill=factor(region)))+
+  geom_boxplot(color="grey30")+
+  facet_wrap(~common,labeller = as_labeller(fish_names)) +
+  my.theme + 
+  scale_fill_manual(values = my.col,guide = guide_legend(title = "Region")) + 
+  ylab("log(CPUE by weight)")+
+  xlab("Year")
+
+p2
+```
+
+\pagebreak
+
+We're so close. But our x-axis labels are still overlapping. Let's rotate them. I have to Google this pretty much every single time (try "ggplot rotate x-axis labels").
+
+```{r rotate_axis_labels}
+p2 + theme(axis.text.x=element_text(angle=45,size=8))
+```
+
+\pagebreak
+
+Closer. But now they're not lined up, so we need to change the horizontal justification. I can never remember which way it works, so I just guess.
+
+```{r hjust}
+p2 + theme(axis.text.x=element_text(angle=45,hjust=-1,size=7.5))
+```
+
+\pagebreak
+
+```{r hjust2}
+#  Try the opposite direction.
+p2 + theme(axis.text.x=element_text(angle=45,hjust=1,size=7.5))
+```
+
+I'll let you figure out how you'd adjust things if you need to shift the labels up or down. If you are feeling a little overwhelmed by this example, don't worry, it literally took me all day to figure out all those customizations the first time. 
+
+\pagebreak
+
+# Some other examples of plotting (that we won't have time for)
+
+There are several different ways that you can make a heat map. Here's just one example, which will take our trawl data for pollock, plot it by longitude and latitude on the x and y-axes, respectively, and it will put CPUE on the z-axis (i.e., the heat map part). We need to tell R how to handle the data though since there are many records within a grid square so we specify the function as the mean of cpue within each grid. 
+
+```{r heatmap1}
+ggplot(trawl[trawl$common=="walleye pollock",],aes(long,lat,z=log(wtcpue))) + 
+  geom_raster(binwidth=1,stat="summary_2d",fun=mean,na.rm=TRUE)
+```
+
+\pagebreak
+
+We can also change the bin size and of course, plot by year instead.
+
+```{r heatmap2}
+ggplot(trawl[trawl$common=="walleye pollock",],aes(long,lat,z=log(wtcpue))) + 
+  geom_raster(binwidth=0.5,stat="summary_2d",fun=mean,na.rm=TRUE) + 
+  facet_wrap(~year)
+```
+
+\pagebreak
+
+This bin size might be a bit too small because now we have missing pixels. Also, maybe we want to use our custom colors to match the rest of our poster. There are really just too many years on this grid to be useful but it's a demonstration of the method more than anything!
+
+```{r heatmap3}
+ggplot(trawl[trawl$common=="walleye pollock",],aes(long,lat,z=log(wtcpue))) +
+  geom_raster(binwidth=1,stat="summary_2d",fun=mean,na.rm=TRUE) +
+  facet_wrap(~year) + 
+  scale_fill_gradient(low=AFSLightBlue,high=AFSDarkBlue)
+```
+
+\pagebreak
+
+# Maps (using built-in *mapdata*)
+
+The heatmap from the previous section is pretty boring without any geographical point of reference. So let's overlay a map. There are tons of different mapping options in ggplot and beyond. I'll demonstrate a few of them over the next few pages but as always, there are countless resources online. 
+
+First we need to load the background maps themselves. Here is one way to do that usings *maps* and *mapdata*. Also, the **map_data** function, which is part of *ggplot2*. This function extracts and reformats the spatial data into a ggplot data frame. 
+
+```{r addMap,message=FALSE}
+library(maps)
+library(mapdata)
+
+world <- map_data("world")
+
+#  To see what this "world" object looks like, use "world".
+head(world)
+```
+
+Let's pre-emptively create some latitude longitude boundaries based on the range of the trawl data (plus a little buffer so our data aren't right at the edge of the maps).
+
+```{r limits}
+minlon <- min(trawl$long)-1
+maxlon <- max(trawl$long) + 1
+minlat <- min(trawl$lat) -1
+maxlat <- max(trawl$lat)+1
+```
+
+\pagebreak
+
+First, I rearranged our heatmap a little bit. Let's make sure it still works. 
+
+```{r simpleMap1}
+ggplot() +
+  geom_raster(data=trawl[trawl$common=="walleye pollock",],
+              aes(long,lat,z=log(wtcpue)),binwidth=1,stat="summary_2d",fun=mean,na.rm=TRUE) +
+  scale_fill_gradient(low=AFSLightBlue,high=AFSDarkBlue) 
+```
+
+\pagebreak
+
+Now we'll add the simple **geom_map** command. You can look at the help files (**?geom_map) to see what each of the pieces mean. 
+
+```{r simpleMap2}
+ggplot() +
+  geom_raster(data=trawl[trawl$common=="walleye pollock",],
+              aes(long,lat,z=log(wtcpue)),binwidth=1,stat="summary_2d",fun=mean,na.rm=TRUE) +
+  scale_fill_gradient(low=AFSLightBlue,high=AFSDarkBlue) + 
+  geom_map(data=world, map=world,
+           aes(x=long, y=lat, map_id=region),fill="grey", color="black", size=0.15)
+```
+
+\pagebreak
+
+Now add those lat-long limits to the map to zoom in on Alaska.
+
+```{r simpleMap3}
+ggplot() +
+  geom_raster(data=trawl[trawl$common=="walleye pollock",],
+              aes(long,lat,z=log(wtcpue)),binwidth=1,stat="summary_2d",fun=mean,na.rm=TRUE) +
+  scale_fill_gradient(low=AFSLightBlue,high=AFSDarkBlue) + 
+  geom_map(data=world, map=world,
+           aes(x=long, y=lat, map_id=region),fill="grey", color="black", size=0.15) + 
+  xlim(minlon,maxlon) + 
+  ylim(minlat,maxlat)
+```
+
+\pagebreak
+
+#  Maps (using *PBSmapping*)
+
+Let's look at a different example of a map. This example was borrowed from Rich Brenner (thanks, Rich!). We'll use the dataset "nepacLLhigh" (which stands for "NE Pacific Latitude Longitude High resolution"). Note the Lat-long distinction is key here instead of UTMs.
+
+```{r mapping1,message=FALSE}
+library(PBSmapping)
+
+#  Load the map data
+data(nepacLLhigh)
+
+#  Create coordinates for a few cities
+cities <- data.frame(lon=c(-146.359505, -145.758158), lat=c(61.133126, 60.543566))
+
+#  Create coordinates for a few of the salmon stocks
+stock_locs <- data.frame(lon=c(-147.814347, -144.908947, -148.128593, -147.448752),
+                         lat=c(61.094084, 60.491447, 60.451407, 61.079911))
+```
+
+Like many spatial datasets this one consists of many different polygons (like a polygon shapefile in ArcGIS or qGIS, etc). In order to plot polygons in a sensible order, we need to tell the polygon geometry (**geom_polygon**) what all of the individual polygons are called so that it can group them appropriately. We can experiment by first looking at the name of each of the fields in the data and then plotting one value and seeing if it looks like a polygon or something else. Starting with the first column, "PID", plot the X and Y values for the first value of PID (where PID==0) and see if it makes a reasonable looking shape. 
+
+```{r polygonID}
+head(nepacLLhigh)
+
+#  Looks like the polygon ID is probably called PID. 
+#  We can confirm that by plotting just one of the polygons. 
+ggplot() + geom_point(data=nepacLLhigh[nepacLLhigh$PID==0,],aes(X,Y))
+```
+
+\pagebreak
+
+Looks pretty good. What if we use a line instead of points?
+
+```{r polygonID2}
+ggplot() + geom_line(data=nepacLLhigh[nepacLLhigh$PID==0,],aes(X,Y))
+```
+
+Whoa! Yeah, so this is a good lesson. Sometimes plotting a line when the order matters, you end up with gobble-dee-gook (official R term). For example, plotting the path of an animal or vessel movement. You can try **geom_path** instead. 
+
+\pagebreak
+
+```{r geom_path}
+ggplot() + geom_path(data=nepacLLhigh[nepacLLhigh$PID==0,],aes(X,Y))
+```
+
+Okay, so it looks like PID is our grouping variable. 
+
+\pagebreak
+
+Now plot a map with polygons, data, etc.
+
+```{r map1} 
+ggplot()+
+geom_polygon(data=nepacLLhigh,aes(x=X,y=Y,group=PID), fill=8, color='black')+ 
+  theme(panel.background=element_rect(fill='white')) +
+coord_map(xlim=c(-148.8,-144), ylim=c(59.5,61.5)) +
+  theme_bw()
+```
+
+\pagebreak
+
+Now let's make it more interesting by adding some labeled and customized points, axes, etc.
+
+```{r map1b} 
+ggplot()+
+geom_polygon(data=nepacLLhigh,aes(x=X,y=Y,group=PID), fill=8, color='black')+ 
+  theme(panel.background=element_rect(fill='white')) +
+xlab(expression(paste(Longitude^o,~'W'))) +
+ylab(expression(paste(Latitude^o,~'N'))) +
+coord_map(xlim=c(-148.8,-144), ylim=c(59.5,61.5)) +
+  geom_point(data=cities, aes(lon, lat), size=4) +
+  theme_bw() +
+  theme(axis.title.y=element_text(size=16)) +
+  theme(axis.title.x=element_text(size=16)) +
+  theme(axis.text.x=element_text(size=14)) +
+  theme(axis.text.y=element_text(size=14)) +
+  annotate("text", x = -146.35, y = 61.2, label = "Valdez") +
+  annotate("text", x = -145.6, y = 60.7, label = "Cordova") +
+  geom_point(data=stock_locs, aes(lon,lat), size = 4, pch=17) +
+  annotate("text", x = -148.1, y = 61.19, label = "Coghill") +
+  annotate("text", x = -144.908947, y = 60.58, label = "Copper R.") +
+  annotate("text", x = -148.5, y = 60.4, label = "Eshamy") +
+  annotate("text", x = -147.3, y = 61.2, label = "Unakwik")
+```
+
+\pagebreak
+
+#  Maps (with bathymetry, using *marmap*)
+Getting back to our trawl data, use the *marmap* package to get bathymetry data for our map. 
+
+```{r getBathy,message=FALSE}
+library(marmap)
+bsbath <- getNOAA.bathy(lon1=minlon,lon2=maxlon,lat1=minlat,lat2=maxlat, resolution=5)
+```
+
+The above is a special type of spatial data object for the *marmap* package. But there is a function in ggplot (**fortify**) that will convert spatial objects to data frames that then work in ggplot. 
+
+```{r fortifyBathy}
+bs.df <- fortify(bsbath)
+
+ggplot() +
+  geom_contour(data=bs.df[bs.df$z <= 0,],aes(x=x,y=y,z=z),colour="black", size=0.1)
+```  
+  
+\pagebreak
+
+Not all that exciting without a map. Let's just add our map from before
+
+```{r map2}
+ggplot() +
+  geom_contour(data=bs.df[bs.df$z <= 0,],aes(x=x,y=y,z=z),colour="black", size=0.1) + 
+  geom_polygon(data=nepacLLhigh,aes(x=X,y=Y,group=PID), fill=8, color='black') + 
+  coord_map(xlim=c(minlon,maxlon), ylim=c(minlat,maxlat)) + 
+  theme_bw()
+```
+
+\pagebreak
+
+Often we don't want ALL of those bathymetry lines but only certain isobaths. For example, let's look at the 100, 200, 500 contours.
+
+```{r map3}
+ggplot() +
+  geom_contour(data=bs.df[bs.df$z <= 0,],
+               aes(x=x,y=y,z=z),colour="black", size=0.1,breaks=c(-100, -200, -500)) + 
+  geom_polygon(data=nepacLLhigh,aes(x=X,y=Y,group=PID), fill=8, color='black') + 
+  coord_map(xlim=c(minlon,maxlon), ylim=c(minlat,maxlat)) + 
+  theme_bw()
+```
+
+\pagebreak
+
+Let's add the locations of each of our sampling stations to the map.
+
+```{r map4}
+stations <- trawl %>% group_by(stn) %>% summarise(lat=lat[1],long=long[1])
+
+ggplot() +
+  geom_point(data=stations,aes(long,lat),col="red") + 
+  geom_contour(data=bs.df[bs.df$z <= 0,],
+               aes(x=x,y=y,z=z),colour="black", size=0.1,breaks=c(-100, -200, -500)) + 
+  geom_polygon(data=nepacLLhigh,aes(x=X,y=Y,group=PID), fill=8, color='black') + 
+  coord_map(xlim=c(minlon,maxlon), ylim=c(minlat,maxlat)) + 
+  theme_bw()
+```
+
+\pagebreak
+
+#  Maps (using *ggmap*)
+
+Using the ggmap library, you can get Google maps. Be careful though, as there are some funky copyright restrictions with journals and Google maps. Also, you need to be online to use this. 
+
+```{r ggmap,message=FALSE}
+library(ggmap)
+
+stations <- trawl %>% group_by(stn) %>% summarise(lat=lat[1],long=long[1])
+
+ggmap(get_googlemap(center=c(-170,58),maptype="satellite",zoom=5)) + 
+  geom_point(data=stations,aes(long,lat),col="red")
+
+```
+
+\pagebreak
+
+One last example using Google maps. The qmap function allows you to simply specify a location by name (e.g., a place name, an address, a landmark, etc.). 
+
+```{r qMap1,message=FALSE}
+# Create some coordinates (these happen to be hatcheries in PWS)
+my.coords <- data.frame(Hatchery = c("Main Bay","Cannery Creek","AFK","Noeremberg"),
+				LONGITUDE = c(-148.09355, -147.51962, -148.06817, -148.08639),
+				LATITUDE = c(60.51922,61.01586,60.04995,60.79770))
+
+# Use different colors for each factor level
+my.colors <- c("red","green","yellow","white")
+qmap('Prince William Sound',zoom=8,maptype='satellite') + 
+				geom_point(data=my.coords, 
+				           aes(x=LONGITUDE,y=LATITUDE,
+				            group = factor(Hatchery),colour=factor(Hatchery)),size=5) + 
+				geom_text(data=my.coords, 
+				          aes(x=LONGITUDE,y=LATITUDE, 
+				              label = Hatchery,colour=factor(Hatchery)), vjust=1.5) + 
+				scale_colour_manual(values=my.colors)
+```
+
+\pagebreak 
+
+```{r qMap2,message=FALSE}
+qmap('Prince William Sound',zoom=8,maptype='terrain') + 
+				geom_point(data=my.coords, 
+				           aes(x=LONGITUDE,y=LATITUDE,
+				               group = factor(Hatchery),colour=factor(Hatchery)),size=5) + 
+				geom_text(data=my.coords, 
+				          aes(x=LONGITUDE,y=LATITUDE, 
+				              label = Hatchery,colour=factor(Hatchery)), vjust=1.5) + 
+				scale_colour_manual(values=my.colors)
+```
+
+\pagebreak
+
+# Homework:     
+1)  Create a histogram of log(wtcpue) from the trawl dataset for arrowtooth flounder, flathead sole, Pacific cod, Pacific halibut, sturgeon poacher, and walleye pollock. Put each species on its own panel and set the width of the histogram bins to be 0.1. Make all plots green (or another custom color of your choice).      
+
+2)  Create a single panel plot that includes 6 density plots (one for each of the species in question 1). Give each of the density plots a transparency of 0.5 so that you can see their overlap. They should each be colored and there should be a figure legend. Change the title of the legend to be "Species" and add a sensible title to the figure. Change the y-axis label to "Density" (capitalized). Get rid of the grey background on the figures. White is fine, but feel free to get creative.     
+
+3)  Create a scatterplot using the trawl data for sablefish where the points show depth (x-axis) versus log(wtcpue). Use the **geom_smooth** function (use ?geom_smooth in R or look online to learn about it) to add trend lines. Include two separate plots - one plot includes a linear trend line and the other includes two nonlinear smoothers (loess, gam, etc.)). For the plot with the nonlinear smoothers, the two lines should be colored based on the "region" field in our data. There should be a legend that shows "north" and "south."  This should be relatively straightforward using the help file and based on what we've done in class. However, most of what you will do in R is based on googling and pulling your hair out. So now I'd like you to save both of these plots into the same pdf that looks like the pdf I sent you called "Homework_3.pdf." However, instead of my name in the title of the figure, I'd like to see your name (if you'd like to include your spirit animal in parenthesis after your name, all the better). There are inevitably multiple ways to do this. I used the **grid.arrange** function, which will require you to install a new R package. 
+
+4)  Create a scatterplot using the trawl data for walleye pollock where the points show depth (x-axis) versus log(wtcpue). Use the **geom_smooth** function (use ?geom_smooth in R or look online to learn about it) to add nonlinear trend lines by region (like we did in the previous problem). Adjust the points so that their sizes are 0.5, include a title that describes the plot and facet by year (i.e., one panel for each year).
+
+5)  Create a scatterplot using the trawl data for walleye pollock where the points show bottom temp (x-axis) versus log(wtcpue). Use the **geom_smooth** function (use ?geom_smooth in R or look online to learn about it) to add nonlinear trend lines colored by region (like we did in the previous problem). Also, make different linetypes for each region (e.g., solid line for north and dashed line for south), and adjust the point sizes to 0.5. Include a title that describes the plot and facet by year (i.e., one panel for each year). Make sure that the temperature range makes sense (sometimes you have to remove wonky data from plots in order to scale plots appropriately). Allow the x-axis of each year to range freely for each facet.  
+
+\pagebreak
+
+Solutions to the homework problems
+
+1) Create a histogram of log(wtcpue) from the trawl dataset for arrowtooth flounder, flathead sole, Pacific
+cod, Pacific halibut, sturgeon poacher, and walleye pollock. Put each species on its own panel and
+set the width of the histogram bins to be 0.1. Make all plots green (or another custom color of your choice).
+
+```{r }
+sixspp <- c("arrowtooth flounder","flathead sole", "Pacific cod", 
+            "Pacific halibut", "sturgeon poacher", "walleye pollock")
+temp2 <- trawl %>% filter(common%in%sixspp)
+
+ggplot(temp2,aes(x=log(wtcpue))) + geom_histogram(binwidth=0.1,color="green") + facet_wrap(~common) + ggsave("HW_1.pdf")
+```
+
+2) Create a single panel plot that includes 6 density plots (one for each of the species in question 1). Give
+each of the density plots a transparency of 0.5 so that you can see their overlap. They should each be
+colored and there should be a figure legend. Change the title of the legend to be “Species” and add
+a sensible title to the figure. Change the y-axis label to “Density” (capitalized). Get rid of the grey
+background on the figures. White is fine, but feel free to get creative.
+
+```{r }
+ggplot(temp2,aes(x=log(wtcpue),fill=common)) + 
+  geom_density(alpha=0.5) + 
+  theme_bw() + 
+  ylab("Density") + 
+  ggtitle("log(wtcpue distribution by species") + 
+  scale_fill_discrete(guide = guide_legend(title = "Species")) + ggsave("HW_2.pdf")
+```
+
+3) Create a scatterplot using the trawl data for sablefish where the points show depth (x-axis) versus
+log(wtcpue). Use the geom_smooth function (use ?geom_smooth in R or look online to learn about
+it) to add trend lines. Include two separate plots - one plot includes a linear trend line and the other
+includes two nonlinear smoothers (loess, gam, etc.)). For the plot with the nonlinear smoothers, the
+two lines should be colored based on the “region” field in our data. There should be a legend that
+shows “north” and “south.” This should be relatively straightforward using the help file and based on
+what we’ve done in class. However, most of what you will do in R is based on googling and pulling
+your hair out. So now I’d like you to save both of these plots into the same pdf that looks like the
+pdf I sent you called “Homework_3.pdf.” However, instead of my name in the title of the figure, I’d
+like to see your name (if you’d like to include your spirit animal in parenthesis after your name, all the
+better). There are inevitably multiple ways to do this. I used the grid.arrange function, which will
+require you to install a new R package.
+
+```{r }
+temp3 <- trawl %>% filter(common=="sablefish")
+
+p1 <- ggplot(temp3,aes(x=depth,y=log(wtcpue))) + geom_point() + geom_smooth(method="lm")
+p2 <- ggplot(temp3,aes(x=depth,y=log(wtcpue),color=region)) + geom_point() + geom_smooth()
+
+library(gridExtra)
+p3 <- grid.arrange(p1,p2,top="Jordan's (grunt sculpin) plot of CPUE",ncol=2)
+#ggsave("HW_3.pdf",p3)
+```
+
+4) Create a scatterplot using the trawl data for walleye pollock where the points show depth (x-axis)
+versus log(wtcpue). Use the geom_smooth function (use ?geom_smooth in R or look online to learn
+about it) to add nonlinear trend lines by region (like we did in the previous problem). Adjust the
+points so that their sizes are 0.5, include a title that describes the plot and facet by year (i.e., one
+panel for each year).
+
+```{r }
+temp4 <- trawl %>% filter(common=="walleye pollock")
+ggplot(temp4,aes(x=depth,y=log(wtcpue),color=region)) + 
+  geom_point(size=0.5) + 
+  geom_smooth() + 
+  facet_wrap(~year) + 
+  ggtitle("Pollock cpue versus depth by year")
+```
+
+5) Create a scatterplot using the trawl data for walleye pollock where the points show bottom temp (xaxis)
+versus log(wtcpue). Use the geom_smooth function (use ?geom_smooth in R or look online
+to learn about it) to add nonlinear trend lines colored by region (like we did in the previous problem).
+Also, make different linetypes for each region (e.g., solid line for north and dashed line for south), and
+adjust the point sizes to 0.5. Include a title that describes the plot and facet by year (i.e., one panel for
+each year). Make sure that the temperature range makes sense (sometimes you have to remove wonky
+data from plots in order to scale plots appropriately). Allow the x-axis of each year to range freely for
+each facet.
+
+```{r }
+ggplot(temp4[temp4$btemp>(-2),],aes(x=btemp,y=log(wtcpue),color=region,linetype=region)) + 
+  geom_point(size=0.5) + 
+  geom_smooth() + 
+  facet_wrap(~year,scales="free_x") + 
+  ggtitle("Pollock bottom temp versus depth by year")
+```
+
+\pagebreak
+
+Acknowledgement:
+This document was one of the many outcomes of the NOAA Fisheries FishSET (Spatial Economics Toolbox for Fisheries) project funded by the NOAA Office of Science and Technology. The views and content expressed in this document do not represent those of the Department of Commerce, the National Oceanic and Atmospheric Administration, the National Marine Fisheries Service, or the Alaska Fisheries Science Center.
