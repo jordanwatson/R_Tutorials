@@ -1,0 +1,180 @@
+---
+title: "Basemap_with_Bathymetry"
+author: "Jordan Watson, NOAA Alaska Fisheries Science Center, jordan.watson@noaa.gov"
+date: "December 8, 2016"
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+First let's load some R packages. 
+
+IMPORTANT!!!!! Load the tidyverse library first. I have received a funky error message from the map_data() function if I load the "maps" library prior to the "tidyverse" (or "ggplot2") library.
+
+```{r,warning=FALSE,message=FALSE}
+# IMPORTANT!!!!! Load the tidyverse library first. 
+# I have received a funky error message from the map_data() function 
+# if I load the "maps" library prior to the "tidyverse" (or "ggplot2") library.
+
+library(tidyverse) # Contains the ggplot2 and dplyr packages
+library(PBSmapping) # From which we'll use the clipPolys function
+library(marmap) # From which we get bathymetry
+library(maps) # From which we get the world2 basemap
+
+```
+
+#  Creating the basemap
+
+Let's start by creating some latitude / longitude boundaries. The longitude values I'm starting with here are positive but we'll deal with that later. In this case though, we're going to create a basemap that spans the dateline and so I'm cheating here. 
+
+```{r}
+xmin <- 160
+xmax <- 220
+ymin <- 50
+ymax <- 70
+```
+
+I happen to know that the "world2" dataset in the maps package spans the dateline (i.e, it's centered on the dateline instead of being centered on the Prime Meridian). Let's load this dataset and automatically use the map_data function from ggplot to convert it to a ggplot data.frame.
+
+```{r}
+myworld <- map_data('world2')
+```
+
+As we have done previously, look at the name of the fields created so that we know how to specify the x and y coordinates in the subsequent map.
+
+```{r}
+head(myworld)
+```
+
+What's it look like?
+
+```{r}
+ggplot() + geom_polygon(data=myworld,
+                        aes(x=long,y=lat,group=factor(group)))
+```
+
+Great, but let's zoom in using the regional boundaries we defined previously.
+
+```{r}
+ggplot() + geom_polygon(data=myworld,
+                        aes(x=long,y=lat,group=factor(group))) + 
+  coord_map(xlim=c(xmin,xmax),ylim=c(ymin,ymax))
+```
+
+Uh oh!!! What happened? We have seen this before (in the other mapping tutorial). If we try to zoom in on just a portion of the map, R gets confused (sometimes, depending on the zoom) about how to draw polygons that fall partially within and partially beyond our mapping region. So we are going to use the clipPolys function from the PBSmapping package to create new polygons that only span our desired plotting region. 
+
+But, the clipPolys function expects different names for the fields (it's just never easy, is it?). So we rename the fields from myworld to match the expected field names for clipPolys. 
+
+```{r}
+names(myworld) <- c("X","Y","PID","POS","region","subregion")
+```
+
+You can learn more about clipPolys via ?clipPolys. We need to specify our x and y boundaries so that it can clip the dataset.
+
+```{r}
+myworld <- clipPolys(myworld, xlim=c(xmin,xmax),ylim=c(ymin,ymax), keepExtra=TRUE)
+```
+
+Now we should have a map that crosses the dateline and includes Asia. 
+
+```{r}
+ggplot() + 
+  geom_polygon(data=myworld,
+               aes(x=X,y=Y,group=factor(PID))) + 
+  coord_map(xlim=c(xmin,xmax),ylim=c(ymin,ymax)) + 
+  theme_bw()
+```
+
+That's better! Now we have a basemap that is centered on the dateline and really shows the entire Bering Sea. 
+
+#  Bathymetry
+
+Now we want to add some bathymetry. In the tutorial called "ggplot_lecture" I showed how to add isobath lines for specific depths. In this case, let's look at adding a bathymetry raster (i.e., pretty map). 
+
+The following two lines will kinda take a long time because they are querying high resolution bathymetry data. To make it just the tiniest bit more sharp, change the "resolution" to like 1 instead of 5. Good for experimenting. Then when you are ready to make your FINAL map, set the resolution to 1 and wait five minutes for magic to happen. 
+
+When we querying the NOAA bathymetry server for data, we have to know that it's longitude range goes from -180 to 180. This means that if we want to have continuous data that span the Pacific, we have to make two separate queries - one for the positive and one for the negative longitudes.
+
+```{r}
+mymap1 <- getNOAA.bathy(lon1 = 160, lon2 = 180, lat1 = ymin, lat2 = ymax, resolution = 5)
+mymap2 <- getNOAA.bathy(lon1 = -180, lon2 = -140, lat1 = ymin, lat2 = ymax, resolution = 5)
+```
+
+So now we have two sets of bathymetry data. Use the fortify.bathy() function to convert the "bathy" object class to a data frame. 
+
+```{r}
+temp <- fortify.bathy(mymap2)
+```
+
+Let's see what the longitudes look like:
+
+```{r}
+summary(temp)
+```
+
+Okay, they're all negative. Let's make them positive
+
+```{r}
+temp$x[temp$x<0] <- temp$x[temp$x<0] + 360
+```
+
+Now we'll convert the other bathymetry object (the one with the positive longitudes) to a data.frame and we'll join it with the one that we just converted to be positive. This way we have a single data.frame with continuous positive longitudes.
+
+```{r}
+newmap <- bind_rows(fortify.bathy(mymap1),temp)
+```
+
+BUT, most of the data that we work with have negative longitudes. So now let's convert the whole thing to be negative. Sure, I could have just converted the positive one to negative originally, but personally I find the extra step acceptable because it was more intuitive for me in the development stages. 
+
+```{r}
+newmap$x <- newmap$x-360
+```
+
+Now we have a data.frame with all negative longitudes. 
+
+```{r}
+summary(newmap)
+```
+
+Let's convert this to a "bathy" object.
+
+```{r}
+newmap <- as.bathy(newmap)
+```
+
+Let's also convert the longitudes of our basemap to be negative.
+
+```{r}
+myworld$X <- myworld$X-360
+```
+
+The "autoplot" function allows us to plot bathymetry objects within ggplot. In this case, we want to plot our bathymetry data as a nice pretty raster. We could also use geom=c("tile") which should give us contour lines instead. I used the scale_fill_continuous function to get rid of the legend.
+
+```{r}
+p1 <- autoplot(newmap,geom=c("raster"),coast=FALSE)+   
+  geom_polygon(data=myworld,
+               aes(x=X,y=Y,group=factor(PID))) + 
+  theme_bw() + 
+  scale_fill_continuous(guide = FALSE)
+
+p1
+```
+
+To add points to the map, you would add a geom_point call that included a data.frame of latitude longitude coordinates.  I'll demonstrate here using the trawl data again (same data used in the dplyr and ggplot tutorials). 
+
+```{r}
+load(url("https://sites.google.com/site/jordantwatson/r/trawl.RData"))
+#  The points have to be in a data.frame. Let's filter out the unique trawl survey sites.
+trawllocations <- distinct(trawl,LONGITUDE,LATITUDE)
+
+p1 + geom_point(data=trawllocations,aes(x=LONGITUDE,y=LATITUDE),size=0.5,color="red")
+```
+
+Say we wanted to save this map as a high resolution file for a paper or poster or something. There are a suite of different file types (e.g., see ?tiff, ?png, ?jpeg, ?pdf). In this case we'll output a 12"x9" png file at 300 dpi resolution. 
+
+```{r}
+png("BathyMap.png",width=12,height=9,units="in",res=300)
+print(p1)
+dev.off()
+```
+
