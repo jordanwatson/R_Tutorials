@@ -1,0 +1,6 @@
+{
+  "name": "R tutorials",
+  "tagline": "Tutorials or code snippets I've put together for people that may be useful. Some of them may need data that I can't share here.",
+  "body": "### dplyr - an R package for manipulating data quickly and efficiently.\r\n[Tutorial](https://github.com/jordanwatson/R_Tutorials/blob/master/dplyr_Lecture.html)\r\n\r\n### ggplot - a really versatile approach to plotting and mapping in R. This also includes an introduction to mapping in ggplot.\r\n[Tutorial](https://github.com/jordanwatson/R_Tutorials/blob/master/ggplot_Lecture.html)\r\n\r\n### More mapping in ggplot (plus a few other packages), building up to the addition of an inset and using multiple external shapefiles (ESRI .shp).\r\n[Tutorial](https://github.com/jordanwatson/R_Tutorials/blob/master/MappingDemo.html)\r\n\r\n### Mapping - using ggplot (and a few other packages) to create an Alaska basemap that includes bathymetry and deals with that pesky 180 degree meridian / date line. \r\n[Tutorial](https://github.com/jordanwatson/R_Tutorials/blob/master/Bathymetry_basemap.html)\r\n\r\n### Need help\r\nYou can contact me via jordan.watson 'at' noaa.gov\r\n\r\n",
+  "note": "Don't delete this file! It's used internally to help with page regeneration."
+}
