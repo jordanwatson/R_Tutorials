@@ -1,0 +1,90 @@
+---
+title: "ERDDAP Code Example"
+author: "Jordan Watson (jordan.watson@noaa.gov)"
+date: "9/25/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+ERDDAPs are data servers that provide a way of delivering data in a series of different formats. There are lots of different ERDDAPs with different datasets but they can all 'talk to each other' and serve as a passthrough for datasets. I'll demonstrate an example of how to pull some data from an ERDDAP using R code instead of downloading the data from the website. 
+
+However, we will still use an ERDDAP website to get the URL and the data field names that we want.   
+
+First let's look at the Coastwatch ERDDAP page (**https://coastwatch.pfeg.noaa.gov/erddap/griddap/**) and see how to explore and find data. The figure below is what you'll find when you get to the CoastWatch page.      
+
+
+![Figure 1](images/griddap_1.png)     
+<br/><br/>
+
+There are thousands of datasets on here so you'll likely want to keyword search (ctrl+F / cmd+F). The dataset I use for SST is the Coral Reef Watch dataset, so I keyword searched for "coral reef" and I ended up here. The image below shows what a data page looks like with each of the different spatial and temporal parameters annotated.      
+<br/><br/>
+
+![Figure 2](images/ERDDAP_2.png)     
+<br/><br/>
+
+The piece that we get from the web page is a URL, which we'll put into our code. You can use the web page to customize your latitude, longitude, and dates, or you can modify them in the URL itself once you generate it. You'll want to select your desired output file type near the bottom of the screenshot shown above. I'll demonstrate here for a netcdf, as that is the optimal file type for most spatial datasets (csv is tempting but unless you have short or coarse temporal extents, the files get huge really fast).    
+<br/><br/>
+
+![Figure 3](images/url_3.png)    
+<br/><br/>
+
+The below screenshot describes each of the components of the URL. If you have a dataset whose longitudes are -180 to 180, you may need to do two separate data pulls to include the Aleutian Islands (yup, super annoying).     
+<br/><br/>
+
+![Figure 4](images/url_4.png)    
+<br/><br/>
+
+Now paste your URL into R and we can download the data directly using R. There are a few different ways that you can download netcdfs. I used to use one of the netCDF R packages, but I started to get some SSL certificate errors, so I've switched methods to use the **download.file()** function, which seems to work pretty well.  You'll specify the output file in the download function  
+
+```{r download data,eval=FALSE}
+download.file(url = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/NOAA_DHW.nc?CRW_SST[(2020-09-13T12:00:00Z):1:(2020-09-23T12:00:00Z)][(60):1:(55)][(-160):1:(-155)],CRW_SSTANOMALY[(2020-09-13T12:00:00Z):1:(2020-09-23T12:00:00Z)][(60):1:(55)][(-160):1:(-155)]",
+              method = "libcurl", 
+              mode="wb",
+              destfile = "myoutputfile.nc")
+```
+
+Now let's read in the NetCDF file the easy way and convert it to an R data frame. 
+```{r message=F}
+library(tidync)
+library(dplyr)
+library(lubridate)
+library(magrittr)
+
+data <- tidync("myoutputfile.nc") %>% 
+  hyper_tibble()
+
+head(data)
+```
+
+Now if we look at the data you'll notice that the data field names match the names from the URL, "CRW_SST" and "CRW_SSTANOMALY". We also have a latitude and longitude as well as a time field. This crazy time integer is actually a date, formatted in terms of seconds since an origin. The lubridate package will fix that right up though. 
+
+```{r}
+data %<>%
+  mutate(date=as_datetime(time))
+
+head(data)
+```
+
+For a gridded dataset that you pull from an ERDDAP, the time part of the date time is unlikely to be that helpful because it's always the same. However, you need to first convert to datetime and then to just a date. You can nest the commands but if the dataset is large you may have to do them sequentially instead because sometimes it chokes on a nested date conversion. But I'll demonstrate with the easy version. 
+
+```{r}
+data %<>%
+  mutate(date=as_date(as_datetime(time)))
+         
+head(data)
+```
+
+Realistically, when I pull data from an ERDDAP, it is often too large of a file to have just a single netCDF for my entire spatial and temporal extent. 
+You can easily just create a loop or an lapply() that pastes the dates into the URL and outputs a file for each year, for example. Happy to provide examples if people would like. 
+
+But one super slick aspect of the ERDDAPs, is the **last** argument. Different satellite datasets will have different lags so if I'm querying data today, I may not know offhand without looking at the website when the most recent data are from. Is it from today? Yesterday? 3 days ago? This is especially poignant if you are creating a process that you want to run to automatically update and merge to previous chunks of data. For example, maybe you want to update data monthly. Instead of specifying a final date in the URL, you can just include the word "last" and it will go up through the most recent date. There is an example in the chunk below. 
+
+```{r download recent data,eval=FALSE}
+download.file(url = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/NOAA_DHW.nc?CRW_SST[(2020-09-13T12:00:00Z):1:(last)][(60):1:(55)][(-160):1:(-155)],CRW_SSTANOMALY[(2020-09-13T12:00:00Z):1:(last)][(60):1:(55)][(-160):1:(-155)]",
+              method = "libcurl", 
+              mode="wb",
+              destfile = "myoutputfile.nc")
+```
